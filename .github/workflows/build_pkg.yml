@@ -1,0 +1,32 @@
+name: Build macOS PKG Installer (Full AI Edition)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-pkg:
+    runs-on: macos-14 # Apple Silicon M1/M2 macOS Runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show Swift & Xcode Version
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run Build & Package Script
+        run: |
+          chmod +x ./build_pkg.sh
+          ./build_pkg.sh
+
+      - name: Upload PKG Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UTHSEB-Setup-1.0.4-FullAI-pkg
+          path: UTHSEB-Setup-1.0.4.pkg
