@@ -37,7 +37,7 @@ enum AiMoodlePolicy {
         }
         
         for suffix in allowedAiDomainSuffixes {
-            if host.hasSuffix("." + suffix) {
+            if host == suffix || host.hasSuffix("." + suffix) {
                 return true
             }
         }

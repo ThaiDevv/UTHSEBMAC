@@ -52,11 +52,36 @@
         });
     }
 
+    // ── Safe Storage Helper (WebKit / about:blank compatibility) ───────
+    const SafeStorage = {
+        getItem: function (key) {
+            try {
+                if (typeof localStorage !== 'undefined') {
+                    return localStorage.getItem(key);
+                }
+            } catch (e) {}
+            return null;
+        },
+        setItem: function (key, value) {
+            try {
+                if (typeof localStorage !== 'undefined') {
+                    localStorage.setItem(key, value);
+                }
+            } catch (e) {}
+        },
+        removeItem: function (key) {
+            try {
+                if (typeof localStorage !== 'undefined') {
+                    localStorage.removeItem(key);
+                }
+            } catch (e) {}
+        }
+    };
+
     // ── Configuration ────────────────────────────────────────────────
     const CONFIG = {
-        // Backend API URL - Configurable via localStorage
-        API_BASE_URL: (typeof localStorage !== 'undefined' && localStorage.getItem('aimoodle_api_url')) || 'http://13.211.200.63:3000',
-        LICENSE_KEY: 'aimoodle_license_token',
+        API_BASE_URL: SafeStorage.getItem('aimoodle_api_url') || 'http://13.211.200.63:3000',
+        LICENSE_KEY: 'sebuth_mac_license_token',
         DEVICE_ID_KEY: 'aimoodle_device_id',
         STORAGE_PREFIX: 'aimoodle_',
 
@@ -91,10 +116,10 @@
 
     // ── Device ID Management ─────────────────────────────────────────
     function getOrCreateDeviceId() {
-        let id = localStorage.getItem(CONFIG.DEVICE_ID_KEY);
+        let id = SafeStorage.getItem(CONFIG.DEVICE_ID_KEY);
         if (!id) {
             id = 'seb_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
-            localStorage.setItem(CONFIG.DEVICE_ID_KEY, id);
+            SafeStorage.setItem(CONFIG.DEVICE_ID_KEY, id);
         }
         return id;
     }
@@ -199,13 +224,20 @@
             });
 
             if (response.success && response.token) {
-                localStorage.setItem(CONFIG.LICENSE_KEY, response.token);
-                currentToken = response.token;
-                localStorage.setItem(CONFIG.LICENSE_KEY + '_info', JSON.stringify({
+                SafeStorage.setItem(CONFIG.LICENSE_KEY, response.token);
+                SafeStorage.setItem(CONFIG.LICENSE_KEY + '_info', JSON.stringify({
                     plan: response.plan,
                     expiresAt: response.expiresAt,
                     activatedAt: Date.now()
                 }));
+
+                currentToken = response.token;
+
+                // Sync token to host
+                postMessageToHost({
+                    type: 'licenseTokenSync',
+                    token: response.token
+                });
 
                 return {
                     success: true,
@@ -216,7 +248,7 @@
 
             return {
                 success: false,
-                reason: response.error || 'Kích hoạt license thất bại'
+                reason: response.error || response.message || response.reason || 'Kích hoạt license thất bại'
             };
         } catch (error) {
             console.error('[AI Moodle] License activation error:', error);
@@ -228,7 +260,10 @@
     }
 
     async function validateLicense() {
-        const storedToken = localStorage.getItem(CONFIG.LICENSE_KEY);
+        let storedToken = SafeStorage.getItem(CONFIG.LICENSE_KEY);
+        if (!storedToken && window.__syncedLicenseToken) {
+            storedToken = window.__syncedLicenseToken;
+        }
 
         if (!storedToken) {
             return { valid: false, reason: 'no_token' };
@@ -242,16 +277,20 @@
 
             if (data.success && data.valid) {
                 currentToken = storedToken;
+                SafeStorage.setItem(CONFIG.LICENSE_KEY, storedToken);
                 return { valid: true, plan: data.plan, expiresAt: data.expiresAt };
             } else {
-                localStorage.removeItem(CONFIG.LICENSE_KEY);
+                SafeStorage.removeItem(CONFIG.LICENSE_KEY);
                 currentToken = null;
+                postMessageToHost({ type: 'licenseRevoked' });
                 return { valid: false, reason: data.reason || 'invalid' };
             }
         } catch (error) {
-            console.warn('[AI Moodle] License validation network error:', error.message);
-            currentToken = storedToken;
-            return { valid: true, offline: true };
+            console.warn('[AI Moodle] License validation error:', error.message);
+            SafeStorage.removeItem(CONFIG.LICENSE_KEY);
+            currentToken = null;
+            postMessageToHost({ type: 'licenseRevoked' });
+            return { valid: false, reason: 'License không hợp lệ hoặc đã hết hạn.' };
         }
     }
 
@@ -359,7 +398,7 @@
             '<svg width="28" height="28" fill="#87ceeb" viewBox="0 0 24 24">' +
             '<path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>' +
             '</svg></div>' +
-            '<h2 style="margin: 0 0 8px; color: #444; font-size: 22px; font-weight: 600;">AI Moodle</h2>' +
+            '<h2 style="margin: 0 0 8px; color: #444; font-size: 22px; font-weight: 600;">UTH SEB</h2>' +
             '<p style="margin: 0; color: #888; font-size: 14px;">Nhập License Key để kích hoạt</p></div>' +
 
             '<div id="aimoodle-license-message" style="' +
@@ -698,8 +737,9 @@
                     err.message.includes('401') ||
                     err.message.includes('403')) {
                     resBox.innerHTML = '<span style="opacity: 0.4;">License hết hạn hoặc không hợp lệ</span>';
-                    localStorage.removeItem(CONFIG.LICENSE_KEY);
+                    SafeStorage.removeItem(CONFIG.LICENSE_KEY);
                     currentToken = null;
+                    postMessageToHost({ type: 'licenseRevoked' });
                     setTimeout(function () { createLicenseModal(null, 'License hết hạn hoặc không hợp lệ'); }, 1000);
                 } else {
                     resBox.innerHTML = '<span style="opacity: 0.4;">' + err.message + '</span>';
@@ -716,16 +756,14 @@
     async function init() {
         deviceId = getOrCreateDeviceId();
 
-        // Check if token is in localStorage, or synced from host
-        var storedToken = localStorage.getItem(CONFIG.LICENSE_KEY);
+        // 1. Kiểm tra token đã lưu trên máy
+        var storedToken = SafeStorage.getItem(CONFIG.LICENSE_KEY);
         if (!storedToken && window.__syncedLicenseToken) {
             storedToken = window.__syncedLicenseToken;
-            try {
-                localStorage.setItem(CONFIG.LICENSE_KEY, storedToken);
-            } catch (e) {}
+            SafeStorage.setItem(CONFIG.LICENSE_KEY, storedToken);
         }
 
-        // 1. Chưa có key nào trên máy -> Hiện popup yêu cầu kích hoạt
+        // 2. Chưa có key nào trên máy -> Hiện popup yêu cầu kích hoạt
         if (!storedToken) {
             createLicenseModal(null, 'Vui lòng nhập License Key để sử dụng.');
             return;
@@ -733,37 +771,40 @@
 
         currentToken = storedToken;
 
-        // 2. Trong khi app đang chạy (phiên đã được xác thực trước đó) -> KHÔNG CHECK LẠI NỮA
+        // 3. Trong khi app đang chạy (phiên đã được xác thực trước đó) -> KHÔNG CHECK LẠI NỮA
         if (window.__isSessionValidated) {
             setupQuestionUI();
             return;
         }
 
-        // 3. Khi mới vào app lần đầu trong phiên -> Kiểm tra 1 lần xem key còn hoạt động không
+        // 4. Khi mới vào app lần đầu trong phiên -> Kiểm tra xem key còn hoạt động không
         try {
             var validation = await validateLicense();
-            if (!validation.valid) {
-                // Key đã hết hạn hoặc bị khóa trên server
-                try { localStorage.removeItem(CONFIG.LICENSE_KEY); } catch (e) {}
+            if (!validation || !validation.valid) {
+                // Key đã hết hạn hoặc không đúng cho product này
+                SafeStorage.removeItem(CONFIG.LICENSE_KEY);
                 currentToken = null;
                 postMessageToHost({ type: 'licenseRevoked' });
-                var message = validation.reason === 'expired'
+                var message = (validation && validation.reason === 'expired')
                     ? 'License đã hết hạn. Vui lòng nhập license mới.'
                     : 'License không hợp lệ hoặc đã bị khóa. Vui lòng nhập license mới.';
                 if (!document.getElementById('aimoodle-license-modal')) {
                     createLicenseModal(null, message);
                 }
             } else {
-                // Key hợp lệ -> Đánh dấu phiên này đã được duyệt, từ giờ đến khi tắt app không bao giờ check lại
+                // Key hợp lệ -> Đánh dấu phiên này đã được duyệt
                 window.__isSessionValidated = true;
                 postMessageToHost({ type: 'sessionValidated' });
                 setupQuestionUI();
             }
         } catch (err) {
-            // Lỗi mạng hoặc sự cố kết nối -> cho phép sinh viên tiếp tục
-            window.__isSessionValidated = true;
-            postMessageToHost({ type: 'sessionValidated' });
-            setupQuestionUI();
+            console.error('[AI Moodle] Init validation error:', err);
+            SafeStorage.removeItem(CONFIG.LICENSE_KEY);
+            currentToken = null;
+            postMessageToHost({ type: 'licenseRevoked' });
+            if (!document.getElementById('aimoodle-license-modal')) {
+                createLicenseModal(null, 'Vui lòng nhập License Key để kích hoạt.');
+            }
         }
     }
 

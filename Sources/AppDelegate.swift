@@ -671,7 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     
     private func licenseFileURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("UTHSEB", isDirectory: true).appendingPathComponent("license.dat")
+        return appSupport.appendingPathComponent("UTHSEB", isDirectory: true).appendingPathComponent("license_full.dat")
     }
     
     private func getCachedLicenseToken() -> String? {
@@ -702,6 +702,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         cachedLicenseToken = nil
         let file = licenseFileURL()
         try? FileManager.default.removeItem(at: file)
+        let legacyFile = file.deletingLastPathComponent().appendingPathComponent("license.dat")
+        try? FileManager.default.removeItem(at: legacyFile)
     }
     
     private func loadAiMoodleScript() -> String? {
