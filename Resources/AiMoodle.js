@@ -18,6 +18,12 @@
         return;
     }
 
+    // Prevent duplicate initialization on the same page
+    if (window.__uthsebAiMoodleInitialized) {
+        return;
+    }
+    window.__uthsebAiMoodleInitialized = true;
+
     // ── Bridge Detection ──────────────────────────────────────────────
     const IS_WEBVIEW2 = typeof window.chrome !== 'undefined' &&
         typeof window.chrome.webview !== 'undefined';

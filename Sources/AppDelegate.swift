@@ -145,13 +145,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         
         let win = KioskWindow(
             contentRect: screenRect,
-            styleMask: [.borderless],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullScreen],
             backing: .buffered,
             defer: false
         )
-        win.level = .screenSaver
-        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenPrimary, .stationary]
-        win.hidesOnDeactivate = false
+        win.title = "UTH SEB v\(version)"
+        win.level = .normal
+        win.collectionBehavior = [.managed, .participatesInCycle, .fullScreenPrimary]
         win.backgroundColor = .black
         win.isOpaque = true
         win.hasShadow = false
@@ -164,6 +164,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         self.window = win
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        
+        // Tự động vào chế độ Toàn màn hình (Full Screen) khi mở app
+        DispatchQueue.main.async {
+            if let window = self.window, !window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+            }
+        }
         
         // Khóa chặt Kiosk Mode: Cấm chuyển tiến trình (Command + Tab), ẩn Dock và MenuBar
         NSApp.presentationOptions = [
@@ -178,12 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     
     // MARK: - NSWindowDelegate
     
-    func windowDidResignKey(_ notification: Notification) {
-        // Tự động thu hồi tiêu điểm nếu ứng dụng bị mất focus
-        DispatchQueue.main.async { [weak self] in
-            self?.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        requestExitConfirmation()
+        return false
     }
     
     // MARK: - Keyboard Monitoring
@@ -239,6 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             alert.messageText = "Cảnh báo gian lận"
             alert.informativeText = "Phát hiện sử dụng nhiều màn hình. Vui lòng rút màn hình phụ và khởi động lại ứng dụng."
             alert.addButton(withTitle: "Thoát")
+            if let win = self.window {
+                alert.window.level = NSWindow.Level(max(win.level.rawValue + 1, NSWindow.Level.modalPanel.rawValue))
+            }
+            alert.window.orderFrontRegardless()
             alert.runModal()
             NSApp.terminate(nil)
         }
@@ -412,6 +420,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         alert.messageText = "Chưa mở được trang thi"
         alert.informativeText = reason
         alert.addButton(withTitle: "Đóng")
+        if let win = self.window {
+            alert.window.level = NSWindow.Level(max(win.level.rawValue + 1, NSWindow.Level.modalPanel.rawValue))
+        }
+        alert.window.orderFrontRegardless()
         alert.runModal()
         showLauncher()
     }
@@ -426,6 +438,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         alert.messageText = reason.title
         alert.informativeText = reason.message
         alert.addButton(withTitle: "Thoát")
+        if let win = self.window {
+            alert.window.level = NSWindow.Level(max(win.level.rawValue + 1, NSWindow.Level.modalPanel.rawValue))
+        }
+        alert.window.orderFrontRegardless()
         alert.runModal()
         NSApp.terminate(nil)
     }
@@ -556,11 +572,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
         
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         if !DomainPolicy.isAllowedWebURL(url) {
-            showBlockedNavigation(url)
+            if isMainFrame {
+                showBlockedNavigation(url)
+            }
             decisionHandler(.cancel)
             return
         }
+        
+        isShowingLauncher = false
         
         if !RequestAuthenticator.requestHasValidHash(navigationAction.request) {
             let signedRequest = RequestAuthenticator.addingHash(to: navigationAction.request)
