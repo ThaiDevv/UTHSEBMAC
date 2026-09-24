@@ -718,7 +718,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
     
     private func injectAiMoodleScript() {
-        guard let currentURL = webView?.url, DomainPolicy.isAllowedWebURL(currentURL) else {
+        let currentURL = webView?.url
+        let isAllowed = currentURL.map { DomainPolicy.isAllowedWebURL($0) } ?? false
+        let isLauncher = isShowingLauncher || currentURL == nil || currentURL?.absoluteString == "about:blank"
+        guard isAllowed || isLauncher else {
             return
         }
         
