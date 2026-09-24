@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSWindowDelegate {
     private var window: KioskWindow?
     private var webView: LockedWebView?
     private var loadingOverlay: NSView?
@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        NSApp.presentationOptions = []
         screenTimer?.invalidate()
         screenTimer = nil
         launchTimeoutWorkItem?.cancel()
@@ -149,11 +150,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             defer: false
         )
         win.level = .screenSaver
-        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenPrimary]
+        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenPrimary, .stationary]
+        win.hidesOnDeactivate = false
         win.backgroundColor = .black
         win.isOpaque = true
         win.hasShadow = false
         win.contentView = web
+        win.delegate = self
         win.onEscapePressed = { [weak self] in
             self?.requestExitConfirmation()
         }
@@ -161,6 +164,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         self.window = win
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        
+        // Khóa chặt Kiosk Mode: Cấm chuyển tiến trình (Command + Tab), ẩn Dock và MenuBar
+        NSApp.presentationOptions = [
+            .hideDock,
+            .hideMenuBar,
+            .disableProcessSwitching,
+            .disableForceQuit,
+            .disableSessionTermination,
+            .disableAppleMenu
+        ]
+    }
+    
+    // MARK: - NSWindowDelegate
+    
+    func windowDidResignKey(_ notification: Notification) {
+        // Tự động thu hồi tiêu điểm nếu ứng dụng bị mất focus
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
     
     // MARK: - Keyboard Monitoring
