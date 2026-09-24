@@ -510,6 +510,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
         
+        // Cho phép giao thức nội bộ về trang trống của WebKit (khi khởi động hoặc nạp launcher)
+        if url.absoluteString == "about:blank" || url.scheme?.lowercased() == "about" {
+            decisionHandler(.allow)
+            return
+        }
+        
+        if isShowingLauncher && url.scheme?.lowercased() == "file" {
+            decisionHandler(.allow)
+            return
+        }
+        
         if url.scheme?.lowercased() == "uthseb" {
             handleIncomingURL(url)
             decisionHandler(.cancel)
@@ -540,6 +551,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+            if url.absoluteString == "about:blank" || url.scheme?.lowercased() == "about" {
+                return nil
+            }
             if AiMoodlePolicy.isAllowedAiURL(url) {
                 webView.load(navigationAction.request)
             } else if DomainPolicy.isAllowedWebURL(url) {

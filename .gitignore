@@ -1,5 +1,7 @@
 .build/
 .swiftpm/
 build/
+output/
 *.pkg
+*.zip
 .DS_Store
